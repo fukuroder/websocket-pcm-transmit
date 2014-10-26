@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<title>PCM packet transmission test using WebSocket</title>
+<script src='http://code.jquery.com/jquery-2.1.1.min.js'></script>
+<script>
+$(function(){
+    var decodedBuffer;
+    var pos=0;
+    var play=false;
+
+    var buffer = new Int16Array(1024*2);
+    var ws = null;
+
+    // get AudioContext
+    var context = new AudioContext();
+
+    var decodeFinished = function(buffer){
+        // set decoded buffer
+        decodedBuffer = buffer;
+
+        // enable play button and file selector
+        $('#play').removeAttr('disabled');
+        $('#wave').removeAttr('disabled');
+    };
+
+    var loadFinished = function(loaded_evt){
+        // decode
+        context.decodeAudioData(loaded_evt.target.result, decodeFinished);
+    };
+
+    var toInt16 = function(v){
+        if(v >= 0.0){
+            if( 32767.0 < v ){
+                return 32767;
+            }
+            else{
+                return Math.round(32767*v);
+            }
+        }
+        else{
+            if(v < -32768.0){
+                return -32768;
+            }
+            else{
+                return Math.round(32768*v);
+            }
+        }
+    }
+
+    function send_pmc(){
+        // Output
+        var input1_arr = decodedBuffer.getChannelData(0);
+        var input2_arr = decodedBuffer.getChannelData(1);
+
+        if(input1_arr.length == pos){
+            $('#play').trigger('click');
+            return;
+        }
+
+        for( var ii = 0; ii < 1024 ; ii++ ){
+            if( pos < input1_arr.length ){
+                buffer[2*ii] = toInt16(input1_arr[pos]);
+                buffer[2*ii+1] = toInt16(input2_arr[pos]);
+                pos++;
+            }
+            else{
+                buffer[2*ii] = 0;
+                buffer[2*ii+1] = 0;
+            }
+        }
+
+        ws.send(buffer);
+    }
+
+    $('#connect')
+    .attr({value:'connect'})
+    .css({width:'100px'})
+    .click(function(){
+        if( $('#connect').val() == 'connect' ){
+            $('#connect').attr({disabled:'disabled'})
+            $('#url').attr({disabled:'disabled'})
+
+            ws = new WebSocket('ws://' + $('#url').val());
+
+            ws.onopen = function(e) {
+                $('#connect').val('disconnect').removeAttr('disabled');
+                $('#url').attr({disabled:'disabled'});
+                $('#wave').removeAttr('disabled');
+            };
+
+            ws.onclose = function(e) {
+                $('#connect').val('connect').removeAttr('disabled');
+                $('#url').removeAttr('disabled');
+                $('#play').attr({disabled:'disabled'});
+                $('#wave').val('').attr({disabled:'disabled'});
+                decodedBuffer = null;
+            };
+
+            ws.onerror = function(e) {
+                alert('connection error.');
+                ws = null;
+                $('#connect').removeAttr('disabled');
+                $('#url').removeAttr('disabled');
+            };
+
+            ws.onmessage = function(e){
+                if(play == true)send_pmc();
+            };
+        }
+        else
+        {
+            //ws.send(new Int16Array(0));
+            ws.close(1000,"");
+            ws = null;
+        }
+    });
+
+    $('#play')
+    .attr({disabled:'disabled', value:'play'})
+    .click(function(){
+        if($('#play').val() == 'stop'){
+            //--------------
+            // play -> stop
+            //--------------
+
+            // change button caption
+            $(this).val('play');
+
+            // enable file selector
+            $('#wave').removeAttr('disabled');
+            $('#connect').removeAttr('disabled');
+
+            //ws.send(new Int16Array(0));
+            play=false;
+        }
+        else{
+            //--------------
+            // stop -> play
+            //--------------
+
+            // change button caption
+            $(this).val('stop');
+
+            // disable file selector
+            $('#wave').attr({disabled:'disabled'});
+            $('#connect').attr({disabled:'disabled'});
+
+            pos=0;
+            play=true;
+            send_pmc();
+        }
+    });
+
+    $('#wave')
+    .attr({disabled:'disabled', accept:'audio/*'})
+    .change(function(file_evt){
+        // disable play button
+        $('#play').attr({disabled:'disabled'});
+
+        if(file_evt.target.files.length == 0){
+            return;
+        }
+
+        // disable file selector
+        $(this).attr({disabled:'disabled'});
+
+        // read local wave file
+        var reader = new FileReader();
+        reader.onload = loadFinished;
+        reader.readAsArrayBuffer(file_evt.target.files[0]);
+    });
+
+    $(window).unload(function(){
+        if(ws != null){
+            ws.close(1000,"");
+        }
+    });
+});
+</script>
+</head>
+<body>
+PCM packet transmission test using WebSocket
+<hr/>
+<input type='button' id='connect'/>
+ws://<input type='text' id='url' style='width:150px' value='xxx.xxx.xxx.xx:xxxx' /><br/>
+<input type='button' id='play' style='width:100px'/>
+<input type='file' id='wave'/>
+</body>
+</html>
